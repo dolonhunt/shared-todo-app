@@ -1,0 +1,17 @@
+{
+  "name": "My Workspace",
+  "short_name": "Workspace",
+  "description": "A shared productivity app for tasks and notes",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f9fafb",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/2991/2991148.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
