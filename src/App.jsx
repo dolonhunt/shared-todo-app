@@ -28,12 +28,6 @@ export default function SharedProductivityApp() {
       setShowInstallBanner(false);
     }
 
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(err => {
-        console.log('Service Worker registration failed:', err);
-      });
-    }
-
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     };
@@ -62,33 +56,25 @@ export default function SharedProductivityApp() {
     setDeferredPrompt(null);
   };
 
-  const loadData = async () => {
+  const loadData = () => {
     try {
-      const [itemsResult, nameResult] = await Promise.all([
-        window.storage.list('item:', true).catch(() => null),
-        window.storage.get('userName', false).catch(() => null)
-      ]);
+      const storedItems = localStorage.getItem('sharedItems');
+      const storedName = localStorage.getItem('userName');
       
-      if (itemsResult?.keys) {
-        const itemPromises = itemsResult.keys.map(key => 
-          window.storage.get(key, true).catch(() => null)
-        );
-        const itemResults = await Promise.all(itemPromises);
-        const loadedItems = itemResults
-          .filter(r => r?.value)
-          .map(r => JSON.parse(r.value))
-          .sort((a, b) => {
-            if (a.priority !== b.priority) {
-              const order = { high: 0, medium: 1, low: 2 };
-              return order[a.priority] - order[b.priority];
-            }
-            return b.timestamp - a.timestamp;
-          });
-        setItems(loadedItems);
+      if (storedItems) {
+        const parsedItems = JSON.parse(storedItems);
+        parsedItems.sort((a, b) => {
+          if (a.priority !== b.priority) {
+            const order = { high: 0, medium: 1, low: 2 };
+            return order[a.priority] - order[b.priority];
+          }
+          return b.timestamp - a.timestamp;
+        });
+        setItems(parsedItems);
       }
       
-      if (nameResult?.value) {
-        setUserName(nameResult.value);
+      if (storedName) {
+        setUserName(storedName);
         setShowNamePrompt(false);
       }
     } catch (err) {
@@ -97,30 +83,38 @@ export default function SharedProductivityApp() {
     setLoading(false);
   };
 
-  const checkReminders = async () => {
+  const saveData = (itemsToSave) => {
     try {
-      const result = await window.storage.list('item:', true);
-      if (!result?.keys) return;
+      localStorage.setItem('sharedItems', JSON.stringify(itemsToSave));
+    } catch (err) {
+      console.error('Save error:', err);
+    }
+  };
 
-      const itemPromises = result.keys.map(key => window.storage.get(key, true));
-      const itemResults = await Promise.all(itemPromises);
+  const checkReminders = () => {
+    try {
+      const storedItems = localStorage.getItem('sharedItems');
+      if (!storedItems) return;
+
+      const parsedItems = JSON.parse(storedItems);
       const now = Date.now();
+      let updated = false;
 
-      for (const r of itemResults) {
-        if (!r?.value) continue;
-        const item = JSON.parse(r.value);
-        
+      parsedItems.forEach(item => {
         if (item.reminderTime && !item.completed && !item.notified) {
           const reminderTimestamp = new Date(item.reminderTime).getTime();
           if (now >= reminderTimestamp) {
             showNotification(item);
             item.notified = true;
-            await window.storage.set(`item:${item.id}`, JSON.stringify(item), true);
+            updated = true;
           }
         }
+      });
+
+      if (updated) {
+        localStorage.setItem('sharedItems', JSON.stringify(parsedItems));
+        loadData();
       }
-      
-      await loadData();
     } catch (err) {
       console.error('Reminder check error:', err);
     }
@@ -144,10 +138,10 @@ export default function SharedProductivityApp() {
     }
   };
 
-  const saveName = async (name) => {
+  const saveName = (name) => {
     if (!name.trim()) return;
     try {
-      await window.storage.set('userName', name.trim(), false);
+      localStorage.setItem('userName', name.trim());
       setUserName(name.trim());
       setShowNamePrompt(false);
     } catch (err) {
@@ -155,7 +149,7 @@ export default function SharedProductivityApp() {
     }
   };
 
-  const addItem = async () => {
+  const addItem = () => {
     if (!input.trim() || !userName) return;
     
     const newItem = {
@@ -169,16 +163,13 @@ export default function SharedProductivityApp() {
       notified: false
     };
     
-    try {
-      await window.storage.set(`item:${newItem.id}`, JSON.stringify(newItem), true);
-      setItems([newItem, ...items]);
-      setInput('');
-    } catch (err) {
-      console.error('Add error:', err);
-    }
+    const updatedItems = [newItem, ...items];
+    setItems(updatedItems);
+    saveData(updatedItems);
+    setInput('');
   };
 
-  const setReminder = async () => {
+  const setReminder = () => {
     if (!reminderDate || !reminderTime) return;
     
     const reminderTimestamp = new Date(`${reminderDate}T${reminderTime}`);
@@ -187,55 +178,35 @@ export default function SharedProductivityApp() {
         ? { ...item, reminderTime: reminderTimestamp.toISOString(), notified: false }
         : item
     );
-    setItems(updated);
     
-    const item = updated.find(i => i.id === currentItemId);
-    try {
-      await window.storage.set(`item:${currentItemId}`, JSON.stringify(item), true);
-      setShowReminderModal(false);
-      setReminderDate('');
-      setReminderTime('');
-      setCurrentItemId(null);
-    } catch (err) {
-      console.error('Reminder error:', err);
-    }
+    setItems(updated);
+    saveData(updated);
+    setShowReminderModal(false);
+    setReminderDate('');
+    setReminderTime('');
+    setCurrentItemId(null);
   };
 
-  const updatePriority = async (id, newPriority) => {
+  const updatePriority = (id, newPriority) => {
     const updated = items.map(item => 
       item.id === id ? { ...item, priority: newPriority } : item
     );
     setItems(updated);
-    
-    const item = updated.find(i => i.id === id);
-    try {
-      await window.storage.set(`item:${id}`, JSON.stringify(item), true);
-    } catch (err) {
-      console.error('Priority update error:', err);
-    }
+    saveData(updated);
   };
 
-  const toggleComplete = async (id) => {
+  const toggleComplete = (id) => {
     const updated = items.map(item => 
       item.id === id ? { ...item, completed: !item.completed } : item
     );
     setItems(updated);
-    
-    const item = updated.find(i => i.id === id);
-    try {
-      await window.storage.set(`item:${id}`, JSON.stringify(item), true);
-    } catch (err) {
-      console.error('Update error:', err);
-    }
+    saveData(updated);
   };
 
-  const deleteItem = async (id) => {
-    setItems(items.filter(item => item.id !== id));
-    try {
-      await window.storage.delete(`item:${id}`, true);
-    } catch (err) {
-      console.error('Delete error:', err);
-    }
+  const deleteItem = (id) => {
+    const updated = items.filter(item => item.id !== id);
+    setItems(updated);
+    saveData(updated);
   };
 
   const filteredItems = items.filter(item => {
@@ -271,6 +242,7 @@ export default function SharedProductivityApp() {
             onKeyPress={(e) => e.key === 'Enter' && saveName(userName)}
             placeholder="Your beautiful name..."
             className="w-full px-5 py-4 rounded-2xl border-2 border-violet-200 focus:border-violet-400 focus:outline-none mb-6 text-lg"
+            autoFocus
           />
           <button
             onClick={() => saveName(userName)}
@@ -461,7 +433,7 @@ export default function SharedProductivityApp() {
         </div>
 
         <div className="mt-6 text-center text-sm text-gray-600 font-medium">
-          <p>✨ PWA-enabled • Real-time sync • Smart reminders 🎉</p>
+          <p>✨ Works on all devices • Smart reminders • Beautiful design 🎉</p>
         </div>
       </div>
 
