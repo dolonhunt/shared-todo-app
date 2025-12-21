@@ -68,22 +68,35 @@ export default function SharedProductivityApp() {
   };
 
   const loadData = async () => {
+    // Check if storage API is available
+    if (!window.storage) {
+      console.error('Storage API not available');
+      setLoading(false);
+      return;
+    }
+
     try {
       let allItems = [];
       
       // Load shared items
       try {
         const sharedItemsResult = await window.storage.list('item:', true);
+        console.log('Shared items result:', sharedItemsResult);
         if (sharedItemsResult?.keys && sharedItemsResult.keys.length > 0) {
           const sharedPromises = sharedItemsResult.keys.map(key => 
-            window.storage.get(key, true).catch(() => null)
+            window.storage.get(key, true).catch(err => {
+              console.log('Error getting shared key:', key, err);
+              return null;
+            })
           );
           const sharedResults = await Promise.all(sharedPromises);
           const sharedItems = sharedResults
             .filter(r => r?.value)
             .map(r => {
               try {
-                return JSON.parse(r.value);
+                const parsed = JSON.parse(r.value);
+                console.log('Loaded shared item:', parsed);
+                return parsed;
               } catch {
                 return null;
               }
@@ -92,22 +105,28 @@ export default function SharedProductivityApp() {
           allItems = [...allItems, ...sharedItems];
         }
       } catch (err) {
-        console.log('No shared items found');
+        console.log('No shared items found:', err);
       }
       
       // Load private items
       try {
         const privateItemsResult = await window.storage.list('item:', false);
+        console.log('Private items result:', privateItemsResult);
         if (privateItemsResult?.keys && privateItemsResult.keys.length > 0) {
           const privatePromises = privateItemsResult.keys.map(key => 
-            window.storage.get(key, false).catch(() => null)
+            window.storage.get(key, false).catch(err => {
+              console.log('Error getting private key:', key, err);
+              return null;
+            })
           );
           const privateResults = await Promise.all(privatePromises);
           const privateItems = privateResults
             .filter(r => r?.value)
             .map(r => {
               try {
-                return JSON.parse(r.value);
+                const parsed = JSON.parse(r.value);
+                console.log('Loaded private item:', parsed);
+                return parsed;
               } catch {
                 return null;
               }
@@ -116,8 +135,10 @@ export default function SharedProductivityApp() {
           allItems = [...allItems, ...privateItems];
         }
       } catch (err) {
-        console.log('No private items found');
+        console.log('No private items found:', err);
       }
+      
+      console.log('Total items loaded:', allItems.length);
       
       // Sort items
       allItems.sort((a, b) => {
@@ -133,12 +154,13 @@ export default function SharedProductivityApp() {
       // Load username
       try {
         const nameResult = await window.storage.get('userName', false);
+        console.log('Username result:', nameResult);
         if (nameResult?.value) {
           setUserName(nameResult.value);
           setShowNamePrompt(false);
         }
       } catch (err) {
-        console.log('No username found');
+        console.log('No username found:', err);
       }
     } catch (err) {
       console.error('Load error:', err);
@@ -210,8 +232,17 @@ export default function SharedProductivityApp() {
 
   const saveName = async (name) => {
     if (!name.trim()) return;
+    
+    if (!window.storage) {
+      console.error('Storage API not available');
+      setUserName(name.trim());
+      setShowNamePrompt(false);
+      return;
+    }
+    
     try {
-      await window.storage.set('userName', name.trim(), false);
+      const result = await window.storage.set('userName', name.trim(), false);
+      console.log('Save name result:', result);
       setUserName(name.trim());
       setShowNamePrompt(false);
     } catch (err) {
@@ -224,6 +255,11 @@ export default function SharedProductivityApp() {
 
   const addItem = async () => {
     if (!input.trim() || !userName) return;
+    
+    if (!window.storage) {
+      console.error('Storage API not available');
+      return;
+    }
     
     const itemIsPrivate = activeTab === 'private' || isPrivate;
     
@@ -241,8 +277,11 @@ export default function SharedProductivityApp() {
       noteContent: itemType === 'note' ? input.trim() : ''
     };
     
+    console.log('Adding item:', newItem, 'Shared:', !itemIsPrivate);
+    
     try {
-      await window.storage.set(`item:${newItem.id}`, JSON.stringify(newItem), !itemIsPrivate);
+      const result = await window.storage.set(`item:${newItem.id}`, JSON.stringify(newItem), !itemIsPrivate);
+      console.log('Storage set result:', result);
       setItems([newItem, ...items]);
       setInput('');
       setIsPrivate(false);
