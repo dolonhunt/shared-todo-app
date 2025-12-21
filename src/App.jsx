@@ -232,17 +232,8 @@ export default function SharedProductivityApp() {
 
   const saveName = async (name) => {
     if (!name.trim()) return;
-    
-    if (!window.storage) {
-      console.error('Storage API not available');
-      setUserName(name.trim());
-      setShowNamePrompt(false);
-      return;
-    }
-    
     try {
-      const result = await window.storage.set('userName', name.trim(), false);
-      console.log('Save name result:', result);
+      await window.storage.set('userName', name.trim(), false);
       setUserName(name.trim());
       setShowNamePrompt(false);
     } catch (err) {
@@ -255,11 +246,6 @@ export default function SharedProductivityApp() {
 
   const addItem = async () => {
     if (!input.trim() || !userName) return;
-    
-    if (!window.storage) {
-      console.error('Storage API not available');
-      return;
-    }
     
     const itemIsPrivate = activeTab === 'private' || isPrivate;
     
@@ -277,11 +263,8 @@ export default function SharedProductivityApp() {
       noteContent: itemType === 'note' ? input.trim() : ''
     };
     
-    console.log('Adding item:', newItem, 'Shared:', !itemIsPrivate);
-    
     try {
-      const result = await window.storage.set(`item:${newItem.id}`, JSON.stringify(newItem), !itemIsPrivate);
-      console.log('Storage set result:', result);
+      await window.storage.set(`item:${newItem.id}`, JSON.stringify(newItem), !itemIsPrivate);
       setItems([newItem, ...items]);
       setInput('');
       setIsPrivate(false);
