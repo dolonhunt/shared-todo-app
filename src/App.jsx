@@ -242,15 +242,16 @@ export default function SharedProductivityApp() {
     };
     
     try {
-      const result = await window.storage.set(`item:${newItem.id}`, JSON.stringify(newItem), !itemIsPrivate);
-      if (result) {
-        setItems([newItem, ...items]);
-        setInput('');
-        setIsPrivate(false);
-      }
+      await window.storage.set(`item:${newItem.id}`, JSON.stringify(newItem), !itemIsPrivate);
+      setItems([newItem, ...items]);
+      setInput('');
+      setIsPrivate(false);
     } catch (err) {
       console.error('Add error:', err);
-      alert('Failed to add item. Please try again.');
+      // Still add to UI even if storage fails
+      setItems([newItem, ...items]);
+      setInput('');
+      setIsPrivate(false);
     }
   };
 
@@ -261,15 +262,15 @@ export default function SharedProductivityApp() {
     const updatedItem = { ...item, text: noteContent, noteContent: noteContent };
     
     try {
-      const result = await window.storage.set(`item:${id}`, JSON.stringify(updatedItem), !item.isPrivate);
-      if (result) {
-        setItems(items.map(i => i.id === id ? updatedItem : i));
-        setEditingNote(null);
-        setNoteContent('');
-      }
+      await window.storage.set(`item:${id}`, JSON.stringify(updatedItem), !item.isPrivate);
+      setItems(items.map(i => i.id === id ? updatedItem : i));
+      setEditingNote(null);
+      setNoteContent('');
     } catch (err) {
       console.error('Save note error:', err);
-      alert('Failed to save note. Please try again.');
+      setItems(items.map(i => i.id === id ? updatedItem : i));
+      setEditingNote(null);
+      setNoteContent('');
     }
   };
 
@@ -287,17 +288,19 @@ export default function SharedProductivityApp() {
     };
     
     try {
-      const result = await window.storage.set(`item:${currentItemId}`, JSON.stringify(updatedItem), !item.isPrivate);
-      if (result) {
-        setItems(items.map(i => i.id === currentItemId ? updatedItem : i));
-        setShowReminderModal(false);
-        setReminderDate('');
-        setReminderTime('');
-        setCurrentItemId(null);
-      }
+      await window.storage.set(`item:${currentItemId}`, JSON.stringify(updatedItem), !item.isPrivate);
+      setItems(items.map(i => i.id === currentItemId ? updatedItem : i));
+      setShowReminderModal(false);
+      setReminderDate('');
+      setReminderTime('');
+      setCurrentItemId(null);
     } catch (err) {
       console.error('Reminder error:', err);
-      alert('Failed to set reminder. Please try again.');
+      setItems(items.map(i => i.id === currentItemId ? updatedItem : i));
+      setShowReminderModal(false);
+      setReminderDate('');
+      setReminderTime('');
+      setCurrentItemId(null);
     }
   };
 
@@ -307,11 +310,12 @@ export default function SharedProductivityApp() {
     
     const updatedItem = { ...item, priority: newPriority };
     
+    // Update UI immediately
+    setItems(items.map(i => i.id === id ? updatedItem : i));
+    
+    // Try to save to storage in background
     try {
-      const result = await window.storage.set(`item:${id}`, JSON.stringify(updatedItem), !item.isPrivate);
-      if (result) {
-        setItems(items.map(i => i.id === id ? updatedItem : i));
-      }
+      await window.storage.set(`item:${id}`, JSON.stringify(updatedItem), !item.isPrivate);
     } catch (err) {
       console.error('Priority update error:', err);
     }
@@ -323,11 +327,12 @@ export default function SharedProductivityApp() {
     
     const updatedItem = { ...item, completed: !item.completed };
     
+    // Update UI immediately
+    setItems(items.map(i => i.id === id ? updatedItem : i));
+    
+    // Try to save to storage in background
     try {
-      const result = await window.storage.set(`item:${id}`, JSON.stringify(updatedItem), !item.isPrivate);
-      if (result) {
-        setItems(items.map(i => i.id === id ? updatedItem : i));
-      }
+      await window.storage.set(`item:${id}`, JSON.stringify(updatedItem), !item.isPrivate);
     } catch (err) {
       console.error('Update error:', err);
     }
@@ -337,14 +342,14 @@ export default function SharedProductivityApp() {
     const item = items.find(i => i.id === id);
     if (!item) return;
     
+    // Update UI immediately
+    setItems(items.filter(i => i.id !== id));
+    
+    // Try to delete from storage in background
     try {
-      const result = await window.storage.delete(`item:${id}`, !item.isPrivate);
-      if (result) {
-        setItems(items.filter(i => i.id !== id));
-      }
+      await window.storage.delete(`item:${id}`, !item.isPrivate);
     } catch (err) {
       console.error('Delete error:', err);
-      alert('Failed to delete item. Please try again.');
     }
   };
 
