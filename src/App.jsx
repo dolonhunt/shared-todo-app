@@ -2,10 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Check, Trash2, Bell, Clock, User, Calendar, Download, X, StickyNote, CheckSquare, Lock, Users, Edit2, Save } from 'lucide-react';
 
 export default function SharedProductivityApp() {
-  // Persistence keys
-  const STORAGE_KEY_ITEMS = 'ps_items';
-  const STORAGE_KEY_USER = 'ps_user';
-
   const [items, setItems] = useState([]);
   const [input, setInput] = useState('');
   const [filter, setFilter] = useState('all');
@@ -23,8 +19,29 @@ export default function SharedProductivityApp() {
   const [activeTab, setActiveTab] = useState('shared');
   const [editingNote, setEditingNote] = useState(null);
   const [noteContent, setNoteContent] = useState('');
+  const [storageReady, setStorageReady] = useState(false);
 
-  // App shell (PWA install prompt)
+  // Check storage availability
+  useEffect(() => {
+    const checkStorage = async () => {
+      if (typeof window !== 'undefined' && window.storage) {
+        try {
+          await window.storage.set('test-key', 'test-value', false);
+          await window.storage.get('test-key', false);
+          await window.storage.delete('test-key', false);
+          setStorageReady(true);
+        } catch (err) {
+          console.error('Storage not working:', err);
+          setStorageReady(false);
+        }
+      } else {
+        console.error('window.storage not available');
+        setStorageReady(false);
+      }
+    };
+    checkStorage();
+  }, []);
+
   useEffect(() => {
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault();
@@ -49,62 +66,28 @@ export default function SharedProductivityApp() {
     };
   }, []);
 
-  // Load persisted data on mount; set up reminder checking
   useEffect(() => {
-    // Load items
-    try {
-      const rawItems = localStorage.getItem(STORAGE_KEY_ITEMS);
-      if (rawItems) {
-        const parsed = JSON.parse(rawItems);
-        if (Array.isArray(parsed)) {
-          setItems(parsed);
-        }
-      }
-    } catch (e) {
-      console.error('Error loading items from localStorage', e);
-    }
-
-    // Load username
-    try {
-      const savedName = localStorage.getItem(STORAGE_KEY_USER);
-      if (savedName) {
-        setUserName(savedName);
-        setShowNamePrompt(false);
-      }
-    } catch (e) {
-      console.error('Error loading username from localStorage', e);
-    }
-
-    // loading complete
-    setLoading(false);
-  }, []);
-
-  // Persist items and username on changes
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY_ITEMS, JSON.stringify(items));
-    } catch (e) {
-      console.error('Error saving items to localStorage', e);
-    }
-  }, [items]);
-
-  useEffect(() => {
-    try {
-      if (userName) {
-        localStorage.setItem(STORAGE_KEY_USER, userName);
-      }
-    } catch (e) {
-      console.error('Error saving username to localStorage', e);
-    }
-  }, [userName]);
-
-  // Reminder system (no window.storage dependency)
-  useEffect(() => {
-    const interval = setInterval(() => {
+    if (storageReady) {
+      loadData();
       checkReminders();
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [items]);
+      const reminderInterval = setInterval(checkReminders, 30000);
+      const syncInterval = setInterval(() => {
+        loadData();
+      }, 5000);
+      return () => {
+        clearInterval(reminderInterval);
+        clearInterval(syncInterval);
+      };
+    } else {
+      setLoading(false);
+    }
+  }, [storageReady]);
+
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
 
   const handleInstallClick = async () => {
     if (!deferredPrompt) return;
@@ -116,29 +99,121 @@ export default function SharedProductivityApp() {
     setDeferredPrompt(null);
   };
 
-  const checkReminders = () => {
-    const now = Date.now();
-    let needsUpdate = false;
-    const updated = items.map((it) => {
-      if (
-        it.type === 'task' &&
-        it.reminderTime &&
-        !it.completed &&
-        !it.notified
-      ) {
-        const reminderTimestamp = new Date(it.reminderTime).getTime();
-        if (now >= reminderTimestamp) {
-          showNotification(it);
-          needsUpdate = true;
-          return { ...it, notified: true };
+  const loadData = async () => {
+    if (!storageReady) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      let allItems = [];
+      
+      try {
+        const sharedItemsResult = await window.storage.list('item:', true);
+        if (sharedItemsResult?.keys && sharedItemsResult.keys.length > 0) {
+          for (const key of sharedItemsResult.keys) {
+            try {
+              const result = await window.storage.get(key, true);
+              if (result?.value) {
+                const item = JSON.parse(result.value);
+                allItems.push(item);
+              }
+            } catch (err) {
+              console.error('Error loading shared item:', key, err);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error listing shared items:', err);
+      }
+      
+      try {
+        const privateItemsResult = await window.storage.list('item:', false);
+        if (privateItemsResult?.keys && privateItemsResult.keys.length > 0) {
+          for (const key of privateItemsResult.keys) {
+            try {
+              const result = await window.storage.get(key, false);
+              if (result?.value) {
+                const item = JSON.parse(result.value);
+                allItems.push(item);
+              }
+            } catch (err) {
+              console.error('Error loading private item:', key, err);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error listing private items:', err);
+      }
+      
+      allItems.sort((a, b) => {
+        if (a.priority !== b.priority) {
+          const order = { high: 0, medium: 1, low: 2 };
+          return order[a.priority] - order[b.priority];
+        }
+        return b.timestamp - a.timestamp;
+      });
+      
+      setItems(allItems);
+      
+      try {
+        const nameResult = await window.storage.get('userName', false);
+        if (nameResult?.value) {
+          setUserName(nameResult.value);
+          setShowNamePrompt(false);
+        }
+      } catch (err) {
+        console.error('Error loading username:', err);
+      }
+    } catch (err) {
+      console.error('Load error:', err);
+    }
+    setLoading(false);
+  };
+
+  const checkReminders = async () => {
+    if (!storageReady) return;
+
+    try {
+      const sharedResult = await window.storage.list('item:', true);
+      const privateResult = await window.storage.list('item:', false);
+      
+      const allKeys = [
+        ...(sharedResult?.keys || []).map(k => ({ key: k, shared: true })),
+        ...(privateResult?.keys || []).map(k => ({ key: k, shared: false }))
+      ];
+      
+      if (allKeys.length === 0) return;
+
+      const now = Date.now();
+      let needsReload = false;
+
+      for (const { key, shared } of allKeys) {
+        try {
+          const result = await window.storage.get(key, shared);
+          if (!result?.value) continue;
+          
+          const item = JSON.parse(result.value);
+          
+          if (item.type === 'task' && item.reminderTime && !item.completed && !item.notified) {
+            const reminderTimestamp = new Date(item.reminderTime).getTime();
+            if (now >= reminderTimestamp) {
+              showNotification(item);
+              item.notified = true;
+              await window.storage.set(key, JSON.stringify(item), shared);
+              needsReload = true;
+            }
+          }
+        } catch (err) {
+          console.error('Error checking reminder:', key, err);
         }
       }
-      return it;
-    });
-
-    if (needsUpdate) {
-      setItems(updated);
-      // localStorage will be updated by the effect
+      
+      if (needsReload) {
+        await loadData();
+      }
+    } catch (err) {
+      console.error('Reminder check error:', err);
     }
   };
 
@@ -160,17 +235,26 @@ export default function SharedProductivityApp() {
     }
   };
 
-  const saveName = (name) => {
+  const saveName = async (name) => {
     if (!name.trim()) return;
+    
     setUserName(name.trim());
     setShowNamePrompt(false);
+    
+    if (storageReady) {
+      try {
+        await window.storage.set('userName', name.trim(), false);
+      } catch (err) {
+        console.error('Error saving username:', err);
+      }
+    }
   };
 
   const addItem = async () => {
     if (!input.trim() || !userName) return;
-
+    
     const itemIsPrivate = activeTab === 'private' || isPrivate;
-
+    
     const newItem = {
       id: Date.now().toString(),
       text: input.trim(),
@@ -184,74 +268,114 @@ export default function SharedProductivityApp() {
       isPrivate: itemIsPrivate,
       noteContent: itemType === 'note' ? input.trim() : ''
     };
-
-    try {
-      // Persist in local state (persisted by useEffect)
-      setItems([newItem, ...items]);
-      setInput('');
-      setIsPrivate(false);
-    } catch (err) {
-      console.error('Add item error:', err);
-      setItems([newItem, ...items]);
-      setInput('');
-      setIsPrivate(false);
+    
+    setItems([newItem, ...items]);
+    setInput('');
+    setIsPrivate(false);
+    
+    if (storageReady) {
+      try {
+        await window.storage.set(`item:${newItem.id}`, JSON.stringify(newItem), !itemIsPrivate);
+      } catch (err) {
+        console.error('Error saving item:', err);
+      }
     }
   };
 
-  const saveNote = (id) => {
+  const saveNote = async (id) => {
     const item = items.find(i => i.id === id);
     if (!item) return;
-
+    
     const updatedItem = { ...item, text: noteContent, noteContent: noteContent };
-
-    // Update in-memory; localStorage persistence via effect
+    
     setItems(items.map(i => i.id === id ? updatedItem : i));
     setEditingNote(null);
     setNoteContent('');
+    
+    if (storageReady) {
+      try {
+        await window.storage.set(`item:${id}`, JSON.stringify(updatedItem), !item.isPrivate);
+      } catch (err) {
+        console.error('Error saving note:', err);
+      }
+    }
   };
 
-  const setReminder = () => {
+  const setReminder = async () => {
     if (!reminderDate || !reminderTime) return;
-
+    
     const reminderTimestamp = new Date(`${reminderDate}T${reminderTime}`);
     const item = items.find(i => i.id === currentItemId);
     if (!item) return;
-
-    const updatedItem = {
-      ...item,
-      reminderTime: reminderTimestamp.toISOString(),
-      // reset notified to allow reminder again if needed
-      notified: false
+    
+    const updatedItem = { 
+      ...item, 
+      reminderTime: reminderTimestamp.toISOString(), 
+      notified: false 
     };
-
+    
     setItems(items.map(i => i.id === currentItemId ? updatedItem : i));
     setShowReminderModal(false);
     setReminderDate('');
     setReminderTime('');
     setCurrentItemId(null);
+    
+    if (storageReady) {
+      try {
+        await window.storage.set(`item:${currentItemId}`, JSON.stringify(updatedItem), !item.isPrivate);
+      } catch (err) {
+        console.error('Error setting reminder:', err);
+      }
+    }
   };
 
-  const updatePriority = (id, newPriority) => {
+  const updatePriority = async (id, newPriority) => {
     const item = items.find(i => i.id === id);
     if (!item) return;
-
+    
     const updatedItem = { ...item, priority: newPriority };
+    
     setItems(items.map(i => i.id === id ? updatedItem : i));
+    
+    if (storageReady) {
+      try {
+        await window.storage.set(`item:${id}`, JSON.stringify(updatedItem), !item.isPrivate);
+      } catch (err) {
+        console.error('Error updating priority:', err);
+      }
+    }
   };
 
-  const toggleComplete = (id) => {
+  const toggleComplete = async (id) => {
     const item = items.find(i => i.id === id);
     if (!item) return;
-
+    
     const updatedItem = { ...item, completed: !item.completed };
+    
     setItems(items.map(i => i.id === id ? updatedItem : i));
+    
+    if (storageReady) {
+      try {
+        await window.storage.set(`item:${id}`, JSON.stringify(updatedItem), !item.isPrivate);
+      } catch (err) {
+        console.error('Error toggling complete:', err);
+      }
+    }
   };
 
-  const deleteItem = (id) => {
+  const deleteItem = async (id) => {
     const item = items.find(i => i.id === id);
     if (!item) return;
-
+    
     setItems(items.filter(i => i.id !== id));
+    
+    if (storageReady) {
+      try {
+        await window.storage.delete(`item:${id}`, !item.isPrivate);
+      } catch (err) {
+        console.error('Error deleting item:', err);
+      }
+    }
   };
 
   const filteredItems = items.filter(item => {
@@ -270,7 +394,6 @@ export default function SharedProductivityApp() {
     }
   };
 
-  // Keep the UI flow the same
   if (showNamePrompt) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -282,10 +405,16 @@ export default function SharedProductivityApp() {
           </div>
           <h2 className="text-2xl font-light text-center mb-2 text-gray-800" style={{fontFamily: 'system-ui, -apple-system, sans-serif'}}>Welcome</h2>
           <p className="text-center text-gray-500 text-sm mb-6">Enter your name to continue</p>
+          {!storageReady && (
+            <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="text-amber-800 text-xs">⚠️ Storage not available. Data won't persist after reload.</p>
+            </div>
+          )}
           <input
             type="text"
             value={userName}
             onChange={(e) => setUserName(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && saveName(userName)}
             placeholder="Your name"
             className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none mb-4"
           />
@@ -338,6 +467,14 @@ export default function SharedProductivityApp() {
         </div>
       )}
 
+      {!storageReady && (
+        <div className="max-w-4xl mx-auto px-4 pt-4">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
+            <p className="text-amber-800 text-sm">⚠️ Storage API is not available. Your data will not persist after reload.</p>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-4xl mx-auto px-4 pt-4">
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="bg-indigo-600 px-4 py-5">
@@ -373,7 +510,7 @@ export default function SharedProductivityApp() {
                 Private
               </button>
             </div>
-
+            
             <div className="space-y-2">
               <div className="flex gap-2">
                 <button
@@ -476,7 +613,7 @@ export default function SharedProductivityApp() {
                         <StickyNote className="w-3 h-3 text-white" />
                       </div>
                     )}
-
+                    
                     <div className="flex-1 min-w-0">
                       {editingNote === item.id ? (
                         <div className="space-y-2">
@@ -511,7 +648,7 @@ export default function SharedProductivityApp() {
                                 <option value="low">Low</option>
                               </select>
                             )}
-
+                            
                             {item.reminderTime && !item.completed && (
                               <span className="text-xs px-2 py-1 bg-blue-500 text-white rounded-md flex items-center gap-1">
                                 <Clock className="w-3 h-3" />
@@ -523,20 +660,20 @@ export default function SharedProductivityApp() {
                                 })}
                               </span>
                             )}
-
+                            
                             {item.isPrivate && (
                               <span className="text-xs px-2 py-1 bg-gray-600 text-white rounded-md flex items-center gap-1">
                                 <Lock className="w-3 h-3" />
                                 Private
                               </span>
                             )}
-
+                            
                             <span className="text-xs text-gray-500">{item.addedBy}</span>
                           </div>
                         </>
                       )}
                     </div>
-
+                    
                     <div className="flex gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                       {item.type === 'note' && editingNote !== item.id && (
                         <button
@@ -584,7 +721,7 @@ export default function SharedProductivityApp() {
               </div>
               <h3 className="text-lg font-medium text-gray-800">Set Reminder</h3>
             </div>
-
+            
             <div className="space-y-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
@@ -596,18 +733,18 @@ export default function SharedProductivityApp() {
                   className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none text-sm"
                 />
               </div>
-
+              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Time</label>
                 <input
                   type="time"
                   value={reminderTime}
                   onChange={(e) => setReminderTime(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none text-sm"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none text-sm transition-all"
                 />
               </div>
             </div>
-
+            
             <div className="flex gap-3 mt-6">
               <button
                 onClick={() => {
@@ -616,13 +753,14 @@ export default function SharedProductivityApp() {
                   setReminderTime('');
                   setCurrentItemId(null);
                 }}
-                className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition-colors text-sm"
+                className="flex-1 px-4 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium hover:bg-gray-50 transition-all"
               >
                 Cancel
               </button>
               <button
                 onClick={setReminder}
-                className="flex-1 px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 transition-colors text-sm"
+                disabled={!reminderDate || !reminderTime}
+                className="flex-1 px-4 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-medium hover:from-blue-600 hover:to-cyan-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-200"
               >
                 Set Reminder
               </button>
