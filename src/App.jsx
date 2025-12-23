@@ -185,6 +185,7 @@ export default function SharedProductivityApp() {
       const storage = getStorage();
       let allItems = [];
       
+      // Load shared items (visible to everyone)
       try {
         const sharedItemsResult = await storage.list('item:', true);
         if (sharedItemsResult?.keys && sharedItemsResult.keys.length > 0) {
@@ -193,6 +194,8 @@ export default function SharedProductivityApp() {
               const result = await storage.get(key, true);
               if (result?.value) {
                 const item = JSON.parse(result.value);
+                // Ensure shared items are marked as not private
+                item.isPrivate = false;
                 allItems.push(item);
               }
             } catch (err) {
@@ -204,6 +207,7 @@ export default function SharedProductivityApp() {
         console.error('Error listing shared items:', err);
       }
       
+      // Load private items (only visible to owner)
       try {
         const privateItemsResult = await storage.list('item:', false);
         if (privateItemsResult?.keys && privateItemsResult.keys.length > 0) {
@@ -212,7 +216,11 @@ export default function SharedProductivityApp() {
               const result = await storage.get(key, false);
               if (result?.value) {
                 const item = JSON.parse(result.value);
-                allItems.push(item);
+                // Only show private items if they belong to current user
+                if (item.addedBy === userName) {
+                  item.isPrivate = true;
+                  allItems.push(item);
+                }
               }
             } catch (err) {
               console.error('Error loading private item:', key, err);
@@ -223,6 +231,7 @@ export default function SharedProductivityApp() {
         console.error('Error listing private items:', err);
       }
       
+      // Sort items by priority and timestamp
       allItems.sort((a, b) => {
         if (a.priority !== b.priority) {
           const order = { high: 0, medium: 1, low: 2 };
@@ -233,6 +242,7 @@ export default function SharedProductivityApp() {
       
       setItems(allItems);
       
+      // Load username
       try {
         const nameResult = await storage.get('userName', false);
         if (nameResult?.value) {
@@ -273,10 +283,14 @@ export default function SharedProductivityApp() {
           
           const item = JSON.parse(result.value);
           
+          // Check reminders for tasks that belong to current user or are shared
           if (item.type === 'task' && item.reminderTime && !item.completed && !item.notified) {
             const reminderTimestamp = new Date(item.reminderTime).getTime();
             if (now >= reminderTimestamp) {
-              showNotification(item);
+              // Only show notification if it's the user's item or a shared item
+              if (!item.isPrivate || item.addedBy === userName) {
+                showNotification(item);
+              }
               item.notified = true;
               await storage.set(key, JSON.stringify(item), shared);
               needsReload = true;
@@ -298,7 +312,7 @@ export default function SharedProductivityApp() {
   const showNotification = (item) => {
     if ('Notification' in window && Notification.permission === 'granted') {
       const notification = new Notification('Task Reminder', {
-        body: item.text,
+        body: `${item.text} - ${item.addedBy}`,
         icon: 'https://cdn-icons-png.flaticon.com/512/2991/2991148.png',
         badge: 'https://cdn-icons-png.flaticon.com/512/2991/2991148.png',
         tag: item.id,
@@ -323,6 +337,8 @@ export default function SharedProductivityApp() {
       try {
         const storage = getStorage();
         await storage.set('userName', name.trim(), false);
+        // Reload data after setting username to show proper items
+        await loadData();
       } catch (err) {
         console.error('Error saving username:', err);
       }
@@ -451,6 +467,11 @@ export default function SharedProductivityApp() {
     const item = items.find(i => i.id === id);
     if (!item) return;
     
+    // Only allow deletion if user owns the item
+    if (item.addedBy !== userName) {
+      return;
+    }
+    
     setItems(items.filter(i => i.id !== id));
     
     if (storageReady) {
@@ -490,16 +511,6 @@ export default function SharedProductivityApp() {
           </div>
           <h2 className="text-2xl font-light text-center mb-2 text-gray-800" style={{fontFamily: 'system-ui, -apple-system, sans-serif'}}>Welcome</h2>
           <p className="text-center text-gray-500 text-sm mb-6">Enter your name to continue</p>
-          {!storageReady && (
-            <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-              <p className="text-amber-800 text-xs">⚠️ Storage not available. Data won't persist after reload.</p>
-            </div>
-          )}
-          {storageReady && storageType === 'localStorage' && (
-            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <p className="text-blue-800 text-xs">ℹ️ Using localStorage for data persistence.</p>
-            </div>
-          )}
           <input
             type="text"
             value={userName}
@@ -553,22 +564,6 @@ export default function SharedProductivityApp() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {!storageReady && (
-        <div className="max-w-4xl mx-auto px-4 pt-4">
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
-            <p className="text-amber-800 text-sm">⚠️ Storage API is not available. Your data will not persist after reload.</p>
-          </div>
-        </div>
-      )}
-
-      {storageReady && storageType === 'localStorage' && (
-        <div className="max-w-4xl mx-auto px-4 pt-4">
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-            <p className="text-blue-800 text-sm">ℹ️ Using localStorage for data persistence.</p>
           </div>
         </div>
       )}
@@ -688,122 +683,135 @@ export default function SharedProductivityApp() {
                   <p className="text-sm">No items yet</p>
                 </div>
               ) : (
-                filteredItems.map(item => (
-                  <div
-                    key={item.id}
-                    className={`flex items-start gap-3 p-3 rounded-lg hover:shadow-md transition-shadow group ${
-                      item.type === 'note' ? 'bg-amber-50 border border-amber-100' : 'bg-gray-50 border border-gray-100'
-                    }`}
-                  >
-                    {item.type === 'task' ? (
-                      <button
-                        onClick={() => toggleComplete(item.id)}
-                        className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
-                          item.completed
-                            ? 'bg-indigo-600 border-indigo-600'
-                            : 'border-gray-300 hover:border-indigo-600'
-                        }`}
-                      >
-                        {item.completed && <Check className="w-3.5 h-3.5 text-white" />}
-                      </button>
-                    ) : (
-                      <div className="mt-0.5 flex-shrink-0 w-5 h-5 rounded bg-amber-500 flex items-center justify-center">
-                        <StickyNote className="w-3 h-3 text-white" />
-                      </div>
-                    )}
-                    
-                    <div className="flex-1 min-w-0">
-                      {editingNote === item.id ? (
-                        <div className="space-y-2">
-                          <textarea
-                            value={noteContent}
-                            onChange={(e) => setNoteContent(e.target.value)}
-                            className="w-full px-3 py-2 rounded-md border border-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none resize-none text-sm"
-                            rows="3"
-                          />
-                          <button
-                            onClick={() => saveNote(item.id)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 text-white rounded-md text-sm font-medium hover:bg-amber-600 transition-colors"
-                          >
-                            <Save className="w-3.5 h-3.5" />
-                            Save
-                          </button>
-                        </div>
+                filteredItems.map(item => {
+                  const canEdit = item.addedBy === userName;
+                  return (
+                    <div
+                      key={item.id}
+                      className={`flex items-start gap-3 p-3 rounded-lg hover:shadow-md transition-shadow group ${
+                        item.type === 'note' ? 'bg-amber-50 border border-amber-100' : 'bg-gray-50 border border-gray-100'
+                      }`}
+                    >
+                      {item.type === 'task' ? (
+                        <button
+                          onClick={() => canEdit && toggleComplete(item.id)}
+                          className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+                            item.completed
+                              ? 'bg-indigo-600 border-indigo-600'
+                              : canEdit 
+                                ? 'border-gray-300 hover:border-indigo-600'
+                                : 'border-gray-300 cursor-not-allowed opacity-50'
+                          }`}
+                          disabled={!canEdit}
+                        >
+                          {item.completed && <Check className="w-3.5 h-3.5 text-white" />}
+                        </button>
                       ) : (
-                        <>
-                          <p className={`text-gray-800 text-sm break-words ${item.completed ? 'line-through opacity-50' : ''}`}>
-                            {item.text}
-                          </p>
-                          <div className="flex items-center gap-2 mt-2 flex-wrap">
-                            {item.type === 'task' && (
-                              <select
-                                value={item.priority}
-                                onChange={(e) => updatePriority(item.id, e.target.value)}
-                                className={`text-xs px-2 py-1 rounded-md font-medium border-0 ${getPriorityColor(item.priority)}`}
-                              >
-                                <option value="high">High</option>
-                                <option value="medium">Medium</option>
-                                <option value="low">Low</option>
-                              </select>
-                            )}
-                            
-                            {item.reminderTime && !item.completed && (
-                              <span className="text-xs px-2 py-1 bg-blue-500 text-white rounded-md flex items-center gap-1">
-                                <Clock className="w-3 h-3" />
-                                {new Date(item.reminderTime).toLocaleString('en-US', { 
-                                  month: 'short', 
-                                  day: 'numeric',
-                                  hour: 'numeric',
-                                  minute: '2-digit'
-                                })}
-                              </span>
-                            )}
-                            
-                            {item.isPrivate && (
-                              <span className="text-xs px-2 py-1 bg-gray-600 text-white rounded-md flex items-center gap-1">
-                                <Lock className="w-3 h-3" />
-                                Private
-                              </span>
-                            )}
-                            
-                            <span className="text-xs text-gray-500">{item.addedBy}</span>
+                        <div className="mt-0.5 flex-shrink-0 w-5 h-5 rounded bg-amber-500 flex items-center justify-center">
+                          <StickyNote className="w-3 h-3 text-white" />
+                        </div>
+                      )}
+                      
+                      <div className="flex-1 min-w-0">
+                        {editingNote === item.id ? (
+                          <div className="space-y-2">
+                            <textarea
+                              value={noteContent}
+                              onChange={(e) => setNoteContent(e.target.value)}
+                              className="w-full px-3 py-2 rounded-md border border-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none resize-none text-sm"
+                              rows="3"
+                            />
+                            <button
+                              onClick={() => saveNote(item.id)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 text-white rounded-md text-sm font-medium hover:bg-amber-600 transition-colors"
+                            >
+                              <Save className="w-3.5 h-3.5" />
+                              Save
+                            </button>
                           </div>
-                        </>
-                      )}
+                        ) : (
+                          <>
+                            <p className={`text-gray-800 text-sm break-words ${item.completed ? 'line-through opacity-50' : ''}`}>
+                              {item.text}
+                            </p>
+                            <div className="flex items-center gap-2 mt-2 flex-wrap">
+                              {item.type === 'task' && canEdit && (
+                                <select
+                                  value={item.priority}
+                                  onChange={(e) => updatePriority(item.id, e.target.value)}
+                                  className={`text-xs px-2 py-1 rounded-md font-medium border-0 ${getPriorityColor(item.priority)}`}
+                                >
+                                  <option value="high">High</option>
+                                  <option value="medium">Medium</option>
+                                  <option value="low">Low</option>
+                                </select>
+                              )}
+                              {item.type === 'task' && !canEdit && (
+                                <span className={`text-xs px-2 py-1 rounded-md font-medium border-0 ${getPriorityColor(item.priority)}`}>
+                                  {item.priority.charAt(0).toUpperCase() + item.priority.slice(1)}
+                                </span>
+                              )}
+                              
+                              {item.reminderTime && !item.completed && (
+                                <span className="text-xs px-2 py-1 bg-blue-500 text-white rounded-md flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  {new Date(item.reminderTime).toLocaleString('en-US', { 
+                                    month: 'short', 
+                                    day: 'numeric',
+                                    hour: 'numeric',
+                                    minute: '2-digit'
+                                  })}
+                                </span>
+                              )}
+                              
+                              {item.isPrivate && (
+                                <span className="text-xs px-2 py-1 bg-gray-600 text-white rounded-md flex items-center gap-1">
+                                  <Lock className="w-3 h-3" />
+                                  Private
+                                </span>
+                              )}
+                              
+                              <span className="text-xs text-gray-500">{item.addedBy}</span>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                      
+                      <div className="flex gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {item.type === 'note' && editingNote !== item.id && canEdit && (
+                          <button
+                            onClick={() => {
+                              setEditingNote(item.id);
+                              setNoteContent(item.noteContent || item.text);
+                            }}
+                            className="text-amber-600 hover:text-amber-700 p-1"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                        )}
+                        {item.type === 'task' && canEdit && (
+                          <button
+                            onClick={() => {
+                              setCurrentItemId(item.id);
+                              setShowReminderModal(true);
+                            }}
+                            className="text-blue-600 hover:text-blue-700 p-1"
+                          >
+                            <Bell className="w-4 h-4" />
+                          </button>
+                        )}
+                        {canEdit && (
+                          <button
+                            onClick={() => deleteItem(item.id)}
+                            className="text-red-500 hover:text-red-600 p-1"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    
-                    <div className="flex gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {item.type === 'note' && editingNote !== item.id && (
-                        <button
-                          onClick={() => {
-                            setEditingNote(item.id);
-                            setNoteContent(item.noteContent || item.text);
-                          }}
-                          className="text-amber-600 hover:text-amber-700 p-1"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                      )}
-                      {item.type === 'task' && (
-                        <button
-                          onClick={() => {
-                            setCurrentItemId(item.id);
-                            setShowReminderModal(true);
-                          }}
-                          className="text-blue-600 hover:text-blue-700 p-1"
-                        >
-                          <Bell className="w-4 h-4" />
-                        </button>
-                      )}
-                      <button
-                        onClick={() => deleteItem(item.id)}
-                        className="text-red-500 hover:text-red-600 p-1"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
