@@ -378,6 +378,23 @@ export default function SharedProductivityApp() {
     }
   };
 
+  const clearReminder = async (id) => {
+    const item = items.find(i => i.id === id);
+    if (!item) return;
+    
+    const updatedItem = { ...item, reminderTime: null, notified: false };
+    
+    setItems(items.map(i => i.id === id ? updatedItem : i));
+    
+    if (storageReady) {
+      try {
+        await window.storage.set(`item:${id}`, JSON.stringify(updatedItem), !item.isPrivate);
+      } catch (err) {
+        console.error('Error clearing reminder:', err);
+      }
+    }
+  };
+
   const filteredItems = items.filter(item => {
     const matchesTab = activeTab === 'shared' ? !item.isPrivate : item.isPrivate;
     if (filter === 'active') return !item.completed && matchesTab;
@@ -394,17 +411,36 @@ export default function SharedProductivityApp() {
     }
   };
 
+  const getStats = () => {
+    const tabItems = items.filter(item => 
+      activeTab === 'shared' ? !item.isPrivate : item.isPrivate
+    );
+    const tasks = tabItems.filter(i => i.type === 'task');
+    const notes = tabItems.filter(i => i.type === 'note');
+    const completedTasks = tasks.filter(i => i.completed);
+    const pendingReminders = tasks.filter(i => i.reminderTime && !i.completed && !i.notified);
+    
+    return {
+      totalTasks: tasks.length,
+      completedTasks: completedTasks.length,
+      totalNotes: notes.length,
+      pendingReminders: pendingReminders.length
+    };
+  };
+
+  const stats = getStats();
+
   if (showNamePrompt) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-lg p-8 max-w-sm w-full">
+      <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-sm w-full border border-gray-100">
           <div className="flex justify-center mb-6">
-            <div className="bg-indigo-600 p-4 rounded-full">
+            <div className="bg-gradient-to-br from-indigo-500 to-purple-600 p-4 rounded-full shadow-lg">
               <User className="w-8 h-8 text-white" />
             </div>
           </div>
-          <h2 className="text-2xl font-light text-center mb-2 text-gray-800" style={{fontFamily: 'system-ui, -apple-system, sans-serif'}}>Welcome</h2>
-          <p className="text-center text-gray-500 text-sm mb-6">Enter your name to continue</p>
+          <h2 className="text-2xl font-semibold text-center mb-2 text-gray-800" style={{fontFamily: 'system-ui, -apple-system, sans-serif'}}>Welcome</h2>
+          <p className="text-center text-gray-500 text-sm mb-6">Enter your name to get started</p>
           {!storageReady && (
             <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
               <p className="text-amber-800 text-xs">⚠️ Storage not available. Data won't persist after reload.</p>
@@ -416,11 +452,12 @@ export default function SharedProductivityApp() {
             onChange={(e) => setUserName(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && saveName(userName)}
             placeholder="Your name"
-            className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none mb-4"
+            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none mb-4 transition-all"
           />
           <button
             onClick={() => saveName(userName)}
-            className="w-full bg-indigo-600 text-white py-3 rounded-lg font-medium hover:bg-indigo-700 transition-colors"
+            disabled={!userName.trim()}
+            className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 rounded-xl font-medium hover:from-indigo-700 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-indigo-200"
           >
             Continue
           </button>
@@ -431,16 +468,19 @@ export default function SharedProductivityApp() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-indigo-600">Loading...</div>
+      <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+          <p className="text-indigo-600 font-medium">Loading...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-6">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 pb-6">
       {showInstallBanner && (
-        <div className="fixed top-0 left-0 right-0 bg-indigo-600 text-white p-3 z-50 shadow-lg">
+        <div className="fixed top-0 left-0 right-0 bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-3 z-50 shadow-lg">
           <div className="max-w-4xl mx-auto flex items-center justify-between gap-3 px-4">
             <div className="flex items-center gap-3 min-w-0">
               <Download className="w-5 h-5 flex-shrink-0" />
@@ -452,13 +492,13 @@ export default function SharedProductivityApp() {
             <div className="flex gap-2 flex-shrink-0">
               <button
                 onClick={handleInstallClick}
-                className="bg-white text-indigo-600 px-4 py-1.5 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors"
+                className="bg-white text-indigo-600 px-4 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors shadow"
               >
                 Install
               </button>
               <button
                 onClick={() => setShowInstallBanner(false)}
-                className="text-white hover:bg-white/20 p-1.5 rounded-md transition-colors"
+                className="text-white hover:bg-white/20 p-1.5 rounded-lg transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -469,29 +509,36 @@ export default function SharedProductivityApp() {
 
       {!storageReady && (
         <div className="max-w-4xl mx-auto px-4 pt-4">
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
-            <p className="text-amber-800 text-sm">⚠️ Storage API is not available. Your data will not persist after reload.</p>
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4 shadow-sm">
+            <p className="text-amber-800 text-sm flex items-center gap-2">
+              <span className="text-lg">⚠️</span>
+              Storage API is not available. Your data will not persist after reload.
+            </p>
           </div>
         </div>
       )}
 
       <div className="max-w-4xl mx-auto px-4 pt-4">
-        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-          <div className="bg-indigo-600 px-4 py-5">
-            <div className="flex items-center justify-between mb-4">
-              <h1 className="text-2xl font-light text-white tracking-wide" style={{fontFamily: 'Georgia, serif'}}>My Workspace</h1>
-              <div className="flex items-center gap-2 bg-white/20 px-3 py-1.5 rounded-full text-sm">
+        <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
+          {/* Header */}
+          <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-6">
+            <div className="flex items-center justify-between mb-5">
+              <h1 className="text-2xl font-bold text-white tracking-wide" style={{fontFamily: 'system-ui, -apple-system, sans-serif'}}>
+                My Workspace
+              </h1>
+              <div className="flex items-center gap-2 bg-white/20 backdrop-blur-sm px-3 py-1.5 rounded-full text-sm">
                 <User className="w-4 h-4 text-white" />
                 <span className="text-white font-medium">{userName}</span>
               </div>
             </div>
 
-            <div className="flex gap-2 mb-4">
+            {/* Tab Buttons */}
+            <div className="flex gap-2 mb-5">
               <button
                 onClick={() => setActiveTab('shared')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm transition-all ${
                   activeTab === 'shared'
-                    ? 'bg-white text-indigo-600'
+                    ? 'bg-white text-indigo-600 shadow-lg'
                     : 'bg-white/20 text-white hover:bg-white/30'
                 }`}
               >
@@ -500,9 +547,9 @@ export default function SharedProductivityApp() {
               </button>
               <button
                 onClick={() => setActiveTab('private')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm transition-all ${
                   activeTab === 'private'
-                    ? 'bg-white text-indigo-600'
+                    ? 'bg-white text-indigo-600 shadow-lg'
                     : 'bg-white/20 text-white hover:bg-white/30'
                 }`}
               >
@@ -510,14 +557,35 @@ export default function SharedProductivityApp() {
                 Private
               </button>
             </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-4 gap-2 mb-5">
+              <div className="bg-white/20 backdrop-blur-sm rounded-xl p-3 text-center">
+                <p className="text-2xl font-bold text-white">{stats.totalTasks}</p>
+                <p className="text-xs text-white/80">Tasks</p>
+              </div>
+              <div className="bg-white/20 backdrop-blur-sm rounded-xl p-3 text-center">
+                <p className="text-2xl font-bold text-white">{stats.completedTasks}</p>
+                <p className="text-xs text-white/80">Done</p>
+              </div>
+              <div className="bg-white/20 backdrop-blur-sm rounded-xl p-3 text-center">
+                <p className="text-2xl font-bold text-white">{stats.totalNotes}</p>
+                <p className="text-xs text-white/80">Notes</p>
+              </div>
+              <div className="bg-white/20 backdrop-blur-sm rounded-xl p-3 text-center">
+                <p className="text-2xl font-bold text-white">{stats.pendingReminders}</p>
+                <p className="text-xs text-white/80">Reminders</p>
+              </div>
+            </div>
             
-            <div className="space-y-2">
+            {/* Item Type Toggle */}
+            <div className="space-y-3">
               <div className="flex gap-2">
                 <button
                   onClick={() => setItemType('task')}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all ${
                     itemType === 'task'
-                      ? 'bg-white text-indigo-600'
+                      ? 'bg-white text-indigo-600 shadow-lg'
                       : 'bg-white/20 text-white hover:bg-white/30'
                   }`}
                 >
@@ -526,9 +594,9 @@ export default function SharedProductivityApp() {
                 </button>
                 <button
                   onClick={() => setItemType('note')}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all ${
                     itemType === 'note'
-                      ? 'bg-white text-indigo-600'
+                      ? 'bg-white text-indigo-600 shadow-lg'
                       : 'bg-white/20 text-white hover:bg-white/30'
                   }`}
                 >
@@ -537,13 +605,14 @@ export default function SharedProductivityApp() {
                 </button>
               </div>
 
+              {/* Input Area */}
               <div className="flex gap-2">
                 {itemType === 'note' ? (
                   <textarea
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     placeholder="Write your note..."
-                    className="flex-1 px-4 py-2.5 rounded-lg border-0 focus:outline-none focus:ring-2 focus:ring-white/50 resize-none text-sm"
+                    className="flex-1 px-4 py-3 rounded-xl border-0 focus:outline-none focus:ring-2 focus:ring-white/50 resize-none text-sm shadow-inner"
                     rows="2"
                   />
                 ) : (
@@ -553,12 +622,13 @@ export default function SharedProductivityApp() {
                     onChange={(e) => setInput(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && addItem()}
                     placeholder="Add a task..."
-                    className="flex-1 px-4 py-2.5 rounded-lg border-0 focus:outline-none focus:ring-2 focus:ring-white/50 text-sm"
+                    className="flex-1 px-4 py-3 rounded-xl border-0 focus:outline-none focus:ring-2 focus:ring-white/50 text-sm shadow-inner"
                   />
                 )}
                 <button
                   onClick={addItem}
-                  className="bg-white text-indigo-600 p-2.5 rounded-lg hover:bg-gray-50 transition-colors flex-shrink-0"
+                  disabled={!input.trim()}
+                  className="bg-white text-indigo-600 p-3 rounded-xl hover:bg-gray-50 transition-all flex-shrink-0 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Plus className="w-5 h-5" />
                 </button>
@@ -566,15 +636,17 @@ export default function SharedProductivityApp() {
             </div>
           </div>
 
+          {/* Content Area */}
           <div className="p-4">
+            {/* Filter Buttons */}
             <div className="flex gap-2 mb-4 overflow-x-auto pb-2">
               {['all', 'active', 'completed'].map(f => (
                 <button
                   key={f}
                   onClick={() => setFilter(f)}
-                  className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex-shrink-0 ${
+                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-all flex-shrink-0 ${
                     filter === f
-                      ? 'bg-indigo-600 text-white'
+                      ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
                 >
@@ -583,74 +655,94 @@ export default function SharedProductivityApp() {
               ))}
             </div>
 
-            <div className="space-y-2">
+            {/* Items List */}
+            <div className="space-y-3">
               {filteredItems.length === 0 ? (
-                <div className="text-center py-12 text-gray-400">
-                  <Calendar className="w-12 h-12 mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">No items yet</p>
+                <div className="text-center py-16 text-gray-400">
+                  <div className="bg-gray-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Calendar className="w-8 h-8 opacity-50" />
+                  </div>
+                  <p className="text-sm font-medium">No items yet</p>
+                  <p className="text-xs mt-1">Add a task or note to get started</p>
                 </div>
               ) : (
                 filteredItems.map(item => (
                   <div
                     key={item.id}
-                    className={`flex items-start gap-3 p-3 rounded-lg hover:shadow-md transition-shadow group ${
-                      item.type === 'note' ? 'bg-amber-50 border border-amber-100' : 'bg-gray-50 border border-gray-100'
+                    className={`flex items-start gap-3 p-4 rounded-xl hover:shadow-lg transition-all group border ${
+                      item.type === 'note' 
+                        ? 'bg-gradient-to-r from-amber-50 to-orange-50 border-amber-200' 
+                        : item.completed 
+                          ? 'bg-gray-50 border-gray-200' 
+                          : 'bg-white border-gray-100 shadow-sm'
                     }`}
                   >
                     {item.type === 'task' ? (
                       <button
                         onClick={() => toggleComplete(item.id)}
-                        className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+                        className={`mt-0.5 flex-shrink-0 w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${
                           item.completed
-                            ? 'bg-indigo-600 border-indigo-600'
-                            : 'border-gray-300 hover:border-indigo-600'
+                            ? 'bg-gradient-to-br from-indigo-500 to-purple-600 border-indigo-500 shadow-md'
+                            : 'border-gray-300 hover:border-indigo-500 hover:bg-indigo-50'
                         }`}
                       >
-                        {item.completed && <Check className="w-3.5 h-3.5 text-white" />}
+                        {item.completed && <Check className="w-4 h-4 text-white" />}
                       </button>
                     ) : (
-                      <div className="mt-0.5 flex-shrink-0 w-5 h-5 rounded bg-amber-500 flex items-center justify-center">
-                        <StickyNote className="w-3 h-3 text-white" />
+                      <div className="mt-0.5 flex-shrink-0 w-6 h-6 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-md">
+                        <StickyNote className="w-3.5 h-3.5 text-white" />
                       </div>
                     )}
                     
                     <div className="flex-1 min-w-0">
                       {editingNote === item.id ? (
-                        <div className="space-y-2">
+                        <div className="space-y-3">
                           <textarea
                             value={noteContent}
                             onChange={(e) => setNoteContent(e.target.value)}
-                            className="w-full px-3 py-2 rounded-md border border-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none resize-none text-sm"
-                            rows="3"
+                            className="w-full px-4 py-3 rounded-xl border border-amber-300 focus:border-amber-500 focus:ring-2 focus:ring-amber-200 focus:outline-none resize-none text-sm"
+                            rows="4"
+                            autoFocus
                           />
-                          <button
-                            onClick={() => saveNote(item.id)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 text-white rounded-md text-sm font-medium hover:bg-amber-600 transition-colors"
-                          >
-                            <Save className="w-3.5 h-3.5" />
-                            Save
-                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => saveNote(item.id)}
+                              className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg text-sm font-medium hover:from-amber-600 hover:to-orange-600 transition-all shadow-md"
+                            >
+                              <Save className="w-4 h-4" />
+                              Save
+                            </button>
+                            <button
+                              onClick={() => {
+                                setEditingNote(null);
+                                setNoteContent('');
+                              }}
+                              className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-all"
+                            >
+                              Cancel
+                            </button>
+                          </div>
                         </div>
                       ) : (
                         <>
-                          <p className={`text-gray-800 text-sm break-words ${item.completed ? 'line-through opacity-50' : ''}`}>
+                          <p className={`text-gray-800 text-sm break-words leading-relaxed ${item.completed ? 'line-through opacity-50' : ''}`}>
                             {item.text}
                           </p>
-                          <div className="flex items-center gap-2 mt-2 flex-wrap">
+                          <div className="flex items-center gap-2 mt-3 flex-wrap">
                             {item.type === 'task' && (
                               <select
                                 value={item.priority}
                                 onChange={(e) => updatePriority(item.id, e.target.value)}
-                                className={`text-xs px-2 py-1 rounded-md font-medium border-0 ${getPriorityColor(item.priority)}`}
+                                className={`text-xs px-2.5 py-1 rounded-lg font-medium border-0 cursor-pointer ${getPriorityColor(item.priority)}`}
                               >
-                                <option value="high">High</option>
-                                <option value="medium">Medium</option>
-                                <option value="low">Low</option>
+                                <option value="high">🔴 High</option>
+                                <option value="medium">🟡 Medium</option>
+                                <option value="low">🟢 Low</option>
                               </select>
                             )}
                             
                             {item.reminderTime && !item.completed && (
-                              <span className="text-xs px-2 py-1 bg-blue-500 text-white rounded-md flex items-center gap-1">
+                              <span className="text-xs px-2.5 py-1 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-lg flex items-center gap-1 shadow-sm">
                                 <Clock className="w-3 h-3" />
                                 {new Date(item.reminderTime).toLocaleString('en-US', { 
                                   month: 'short', 
@@ -658,22 +750,36 @@ export default function SharedProductivityApp() {
                                   hour: 'numeric',
                                   minute: '2-digit'
                                 })}
+                                <button
+                                  onClick={() => clearReminder(item.id)}
+                                  className="ml-1 hover:bg-white/20 rounded p-0.5"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
                               </span>
                             )}
                             
                             {item.isPrivate && (
-                              <span className="text-xs px-2 py-1 bg-gray-600 text-white rounded-md flex items-center gap-1">
+                              <span className="text-xs px-2.5 py-1 bg-gray-700 text-white rounded-lg flex items-center gap-1">
                                 <Lock className="w-3 h-3" />
                                 Private
                               </span>
                             )}
                             
-                            <span className="text-xs text-gray-500">{item.addedBy}</span>
+                            <span className="text-xs text-gray-400 flex items-center gap-1">
+                              <User className="w-3 h-3" />
+                              {item.addedBy}
+                            </span>
+                            
+                            <span className="text-xs text-gray-400">
+                              {new Date(item.timestamp).toLocaleDateString()}
+                            </span>
                           </div>
                         </>
                       )}
                     </div>
                     
+                    {/* Action Buttons */}
                     <div className="flex gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                       {item.type === 'note' && editingNote !== item.id && (
                         <button
@@ -681,25 +787,28 @@ export default function SharedProductivityApp() {
                             setEditingNote(item.id);
                             setNoteContent(item.noteContent || item.text);
                           }}
-                          className="text-amber-600 hover:text-amber-700 p-1"
+                          className="text-amber-600 hover:text-amber-700 p-2 hover:bg-amber-100 rounded-lg transition-all"
+                          title="Edit note"
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
                       )}
-                      {item.type === 'task' && (
+                      {item.type === 'task' && !item.completed && (
                         <button
                           onClick={() => {
                             setCurrentItemId(item.id);
                             setShowReminderModal(true);
                           }}
-                          className="text-blue-600 hover:text-blue-700 p-1"
+                          className="text-blue-600 hover:text-blue-700 p-2 hover:bg-blue-100 rounded-lg transition-all"
+                          title="Set reminder"
                         >
                           <Bell className="w-4 h-4" />
                         </button>
                       )}
                       <button
                         onClick={() => deleteItem(item.id)}
-                        className="text-red-500 hover:text-red-600 p-1"
+                        className="text-red-500 hover:text-red-600 p-2 hover:bg-red-100 rounded-lg transition-all"
+                        title="Delete"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -710,32 +819,41 @@ export default function SharedProductivityApp() {
             </div>
           </div>
         </div>
+
+        {/* Footer */}
+        <div className="text-center mt-6 text-gray-400 text-xs">
+          <p>Shared Productivity App • {new Date().getFullYear()}</p>
+        </div>
       </div>
 
+      {/* Reminder Modal */}
       {showReminderModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl p-6 max-w-sm w-full shadow-xl">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="bg-blue-100 p-2 rounded-lg">
-                <Bell className="w-5 h-5 text-blue-600" />
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-gray-100">
+            <div className="flex items-center gap-3 mb-5">
+              <div className="bg-gradient-to-br from-blue-500 to-cyan-500 p-3 rounded-xl shadow-lg">
+                <Bell className="w-5 h-5 text-white" />
               </div>
-              <h3 className="text-lg font-medium text-gray-800">Set Reminder</h3>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-800">Set Reminder</h3>
+                <p className="text-sm text-gray-500">Get notified at your chosen time</p>
+              </div>
             </div>
             
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Date</label>
                 <input
                   type="date"
                   value={reminderDate}
                   onChange={(e) => setReminderDate(e.target.value)}
                   min={new Date().toISOString().split('T')[0]}
-                  className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none text-sm"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none text-sm transition-all"
                 />
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Time</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Time</label>
                 <input
                   type="time"
                   value={reminderTime}
